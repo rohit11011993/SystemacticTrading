@@ -12,13 +12,24 @@
 # data folder (FR-13.4, FR-5.5) so they can change without a rebuild. Plugins may only import
 # libraries that ship in this bundle (FR-13.5) - numpy, pandas, pydantic and the stdlib.
 import os
+import sys
 
 from PyInstaller.utils.hooks import collect_submodules
 
 HERE = SPECPATH                                   # folder of this spec (set by PyInstaller)
-ROOT = os.path.abspath(os.path.join(HERE, ".."))  # repository root, so `algotrader` is importable
+ROOT = os.path.abspath(os.path.join(HERE, ".."))  # repository root
+# collect_submodules() imports the package in THIS process, so the repository root must be on
+# sys.path here - `pathex` below only applies to the later dependency analysis.
+sys.path.insert(0, ROOT)
 
-hidden = collect_submodules("algotrader") + ["yaml", "pydantic", "numpy", "pandas"]
+# Strategy plugins live OUTSIDE the executable and import algotrader.strategy.api at runtime.
+# Nothing inside the app imports that facade, so PyInstaller cannot discover it by analysis:
+# every algotrader module is bundled explicitly, and the build fails loudly if that list is empty.
+app_modules = collect_submodules("algotrader")
+for required in ("algotrader.strategy.api", "algotrader.indicators", "algotrader.data.provider"):
+    if required not in app_modules:
+        raise SystemExit(f"spec error: {required} not collected - is the repository root importable?")
+hidden = app_modules + ["yaml", "pydantic", "numpy", "pandas"]
 excludes = ["tkinter", "matplotlib", "IPython", "pytest", "hypothesis"]
 
 # Command-line / engine executable.

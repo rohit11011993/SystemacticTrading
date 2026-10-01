@@ -46,6 +46,16 @@ jobs:
           & $exe backtest --config config --data smoke-data --start 2025-06-01 --out smoke-reports
           if ($LASTEXITCODE) { exit 1 }
 
+      - name: Smoke-test the desktop UI starts (non-blocking)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $p = Start-Process dist\AlgoTrader\AlgoTraderUI.exe -ArgumentList "config" -PassThru
+          Start-Sleep -Seconds 15
+          if ($p.HasExited) { Write-Error "AlgoTraderUI.exe exited early with code $($p.ExitCode)"; exit 1 }
+          Stop-Process -Id $p.Id -Force
+          Write-Host "AlgoTraderUI.exe started and kept running"
+
       - name: Record release hashes (FR-13.8)
         shell: pwsh
         run: |
