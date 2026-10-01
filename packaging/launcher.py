@@ -3,6 +3,7 @@
 import sys
 
 from algotrader.cli import main
+from algotrader.crashlog import run_guarded
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run_guarded(main, console=True))

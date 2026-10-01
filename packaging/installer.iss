@@ -38,7 +38,7 @@ Name: "{#DataDir}\reports"
 
 [Icons]
 Name: "{group}\AlgoTrader (desktop UI)"; Filename: "{app}\AlgoTraderUI.exe"; Parameters: """{#DataDir}\config"""; WorkingDir: "{#DataDir}"
-Name: "{group}\AlgoTrader engine (paper)"; Filename: "{app}\AlgoTrader.exe"; Parameters: "engine --config ""{#DataDir}\config"""; WorkingDir: "{#DataDir}"
+Name: "{group}\AlgoTrader engine (paper)"; Filename: "{app}\AlgoTrader.exe"; Parameters: "engine --mode paper --config ""{#DataDir}\config"""; WorkingDir: "{#DataDir}"
 Name: "{group}\AlgoTrader paper replay (demo)"; Filename: "{app}\AlgoTrader.exe"; Parameters: "replay --config ""{#DataDir}\config"" --start 2026-01-01 --wait"; WorkingDir: "{#DataDir}"
 Name: "{group}\AlgoTrader command prompt"; Filename: "{cmd}"; Parameters: "/k set ""PATH={app};%PATH%"""; WorkingDir: "{#DataDir}"
 Name: "{group}\AlgoTrader data folder"; Filename: "{#DataDir}"
@@ -51,5 +51,8 @@ Name: "demodata"; Description: "Generate synthetic demo data (needed to try the 
 
 [Run]
 Filename: "{app}\AlgoTrader.exe"; Parameters: "make-synthetic --out ""{#DataDir}\data"""; StatusMsg: "Generating demo data..."; Flags: runhidden; Tasks: demodata
+Filename: "{app}\AlgoTrader.exe"; Parameters: "replay --config ""{#DataDir}\config"" --start 2026-01-01"; WorkingDir: "{#DataDir}"; StatusMsg: "Preparing demo paper-trading history (1-3 minutes)..."; Flags: runhidden; Tasks: demodata
 Filename: "{app}\AlgoTrader.exe"; Parameters: "validate-config --config ""{#DataDir}\config"""; StatusMsg: "Validating configuration..."; Flags: runhidden
+; The UI needs the engine running: offer both, engine first.
+Filename: "{app}\AlgoTrader.exe"; Parameters: "engine --mode paper --config ""{#DataDir}\config"""; WorkingDir: "{#DataDir}"; Description: "Start the paper-trading engine (keep its window open)"; Flags: postinstall nowait skipifsilent
 Filename: "{app}\AlgoTraderUI.exe"; Parameters: """{#DataDir}\config"""; WorkingDir: "{#DataDir}"; Description: "Open AlgoTrader"; Flags: postinstall nowait skipifsilent

@@ -137,7 +137,7 @@ class DashboardScreen(Screen):
 
         alive, hb = self.bridge.engine_status()
         self.h["engine"].set_state("ok" if alive else "bad", f"running ({age(hb)})" if alive else
-                                   f"offline (last {age(hb)})" if hb else "never started")
+                                   f"offline (last {age(hb)})" if hb else "not running - click Start engine")
         hl = snap.get("health", {})
         for k, ok_t, bad_t in (("data", "connected", "DISCONNECTED"), ("broker", "connected", "DISCONNECTED"),
                                ("session", "valid", "NO SESSION"), ("gateway", "enforcing", "DOWN - fail closed"),

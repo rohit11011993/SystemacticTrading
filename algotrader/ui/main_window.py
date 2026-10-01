@@ -40,6 +40,7 @@ class MainWindow(QMainWindow):
         self.interactive = interactive        # tests run without modal dialogs
         self.snap: dict[str, Any] = bridge.snapshot()
         self._seen_alerts: set[str] = set()
+        self._engine_proc = None          # engine started from this window, if any
         self._last_cmd_id = max((c["id"] for c in bridge.commands(1)), default=0)
         self.setWindowTitle("AlgoTrader")
         self.resize(1400, 860)
@@ -99,7 +100,13 @@ class MainWindow(QMainWindow):
         self.day_lbl = QLabel()
         self.age_lbl = QLabel()
         self.age_lbl.setObjectName("Muted")
-        for w in (title, self.mode, self.engine, self.ladder, self.nav_lbl, self.day_lbl, self.age_lbl):
+        self.start_btn = QPushButton("\u25b6 Start engine")
+        self.start_btn.setToolTip("Start the paper-trading engine in its own window. Live trading is "
+                                  "started from the command line, never from here.")
+        self.start_btn.clicked.connect(self.start_engine)
+        self.start_btn.setVisible(False)
+        for w in (title, self.mode, self.engine, self.start_btn, self.ladder, self.nav_lbl, self.day_lbl,
+                  self.age_lbl):
             lay.addWidget(w)
         lay.addStretch(1)
         self.exit_all_btn = QPushButton("EXIT ALL")
@@ -148,8 +155,15 @@ class MainWindow(QMainWindow):
         s = self.snap
         self.mode.set_state("warn" if s["mode"] == "live" else "neutral", str(s["mode"]).upper())
         alive, hb = self.bridge.engine_status()
-        self.engine.set_state("ok" if alive else "bad", "ENGINE OK" if alive else "ENGINE OFFLINE")
+        starting = self._engine_proc is not None and self._engine_proc.poll() is None and not alive
+        if self._engine_proc is not None and self._engine_proc.poll() not in (None, 0):
+            code = self._engine_proc.returncode
+            self._engine_proc = None
+            self.status(f"the engine stopped with exit code {code}; see crash.log in {self.bridge.base}")
+        self.engine.set_state("ok" if alive else "warn" if starting else "bad",
+                              "ENGINE OK" if alive else "ENGINE STARTING..." if starting else "ENGINE OFFLINE")
         self.engine.setToolTip("Commands are queued until the engine runs" if not alive else "")
+        self.start_btn.setVisible(not alive and not starting)
         self.ladder.set_state(LADDER.get(s["ladder"], "ok"), f"DD {s['ladder']}")
         self.nav_lbl.setText(f"NAV <b>{inr(s['nav'])}</b>")
         dp = s["day_pnl"]
@@ -196,6 +210,22 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(msg, 15000)
 
     # -- actions ---------------------------------------------------------------------------
+    def start_engine(self) -> bool:
+        """Start the paper engine (FR-13.6 normally runs it as a service; this is the manual path)."""
+        if not self.confirm_action("Start engine", "Start the paper-trading engine?",
+                                   "It opens in its own window. Keep that window open while you use AlgoTrader; "
+                                   "closing it stops the engine (open trades keep their stops).", danger=False):
+            return False
+        try:
+            from .launcher import start_engine
+            self._engine_proc = start_engine(self.bridge.root)
+        except OSError as exc:
+            self.status(f"could not start the engine: {exc}")
+            return False
+        self.status("engine starting... the badge turns green within a few seconds")
+        self.refresh()
+        return True
+
     def confirm_action(self, title: str, text: str, detail: str = "", danger: bool = True) -> bool:
         return True if not self.interactive else confirm(self, title, text, detail, danger)
 

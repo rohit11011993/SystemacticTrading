@@ -97,6 +97,14 @@ def _engine_for_session(a: argparse.Namespace):
             inst = reg.get(sym) if sym in reg else reg.get(sym.split(":")[0])
             return inst.exchange, inst.data_symbol or inst.symbol
         broker = KiteBroker(a.api_key, token, symbol_map)
+    data_dir = Path(a.data) if a.data else Path(a.config).resolve().parent / cfg.system.data_dir
+    feed = cfg.portfolio.regime.market_series
+    if not (data_dir / f"{feed}.csv").exists() and not (data_dir / f"{feed}.parquet").exists():
+        print(f"No market data found in {data_dir}\n"
+              f"To try the system with demo data, run:\n"
+              f"  AlgoTrader.exe make-synthetic --out \"{data_dir}\"\n"
+              "or put your own daily bars there (one CSV per instrument: date,open,high,low,close,volume).")
+        raise SystemExit(2)
     engine = build_engine(a.config, mode=mode, broker=broker, data_dir=a.data,
                           state_path=cfg.system.state_db, audit_path=cfg.system.audit_log, cfg=cfg)
     engine.restore_state()

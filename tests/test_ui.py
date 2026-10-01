@@ -169,3 +169,34 @@ def test_indian_number_format():
     assert inr(12345678) == "₹1,23,45,678"
     assert inr(-1500.5, 2) == "-₹1,500.50"
     assert inr(None) == "-"
+
+
+def test_engine_launcher_command_and_start(tmp_path, monkeypatch):
+    """The UI's Start-engine button runs `algotrader engine --mode paper` (never live)."""
+    import subprocess
+
+    from algotrader.ui import launcher
+    cmd = launcher.engine_command(CONFIG)
+    assert cmd[-5:] == ["engine", "--mode", "paper", "--config", str(CONFIG.resolve())]
+    seen = {}
+
+    class FakePopen:
+        def __init__(self, args, **kw):
+            seen["args"], seen["kw"] = args, kw
+
+        def poll(self):
+            return None
+    monkeypatch.setattr(subprocess, "Popen", FakePopen)
+    launcher.start_engine(CONFIG)
+    assert seen["args"] == cmd and seen["kw"]["cwd"] == str(CONFIG.resolve().parent)
+
+
+def test_crash_guard_keeps_errors(tmp_path, monkeypatch):
+    from algotrader.crashlog import run_guarded
+    monkeypatch.chdir(tmp_path)
+
+    def boom():
+        raise RuntimeError("engine exploded")
+    assert run_guarded(boom, console=True) == 1
+    assert "engine exploded" in (tmp_path / "crash.log").read_text()
+    assert run_guarded(lambda: 0) == 0

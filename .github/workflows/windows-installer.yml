@@ -45,6 +45,11 @@ jobs:
           & $exe drill --config config --data smoke-data;       if ($LASTEXITCODE) { exit 1 }
           & $exe backtest --config config --data smoke-data --start 2025-06-01 --out smoke-reports
           if ($LASTEXITCODE) { exit 1 }
+          # The installed workflow: replay builds paper state, then one engine cycle serves the UI.
+          & $exe replay --config config --data smoke-data --start 2026-08-01;   if ($LASTEXITCODE) { exit 1 }
+          & $exe engine --mode paper --config config --data smoke-data --once; if ($LASTEXITCODE) { exit 1 }
+          python -c "from algotrader.ui.bridge import UiBridge; b = UiBridge('config'); alive, age = b.engine_status(); snap = b.snapshot(); print('engine alive', alive, 'nav', snap['nav'], 'trades', len(snap['trades'])); assert alive and snap['ts']"
+          if ($LASTEXITCODE) { exit 1 }
 
       - name: Smoke-test the desktop UI starts (non-blocking)
         continue-on-error: true
