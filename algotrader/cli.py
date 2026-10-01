@@ -13,6 +13,8 @@ Sub-commands
   keygen           generate one-time external reset codes and their hashes
   drill            rehearse every kill-switch level against the paper broker (FR-9.6)
   watchdog         run the heartbeat supervisor
+  engine           long-running engine: applies operator commands, publishes the UI snapshot
+  ui               PySide6 desktop UI (attaches to the engine through the state database)
   verify-audit     verify the audit log hash chain
 
 The engine, gateway and watchdog roles map to these commands; in version 1 the engine hosts
@@ -118,6 +120,50 @@ def cmd_run_day(a: argparse.Namespace) -> int:
     for msg in dict.fromkeys(engine.alerts):
         print(f"ALERT: {msg}")
     return 0
+
+
+def cmd_engine(a: argparse.Namespace) -> int:
+    """Long-running engine: applies UI/CLI commands every ``--interval`` seconds, publishes the UI
+    snapshot and heartbeat, and runs the daily session when a new bar appears in the data."""
+    import time as _t
+    engine = _engine_for_session(a)
+    feed = engine.registry.get(engine.cfg.portfolio.regime.market_series).feed
+    engine.publish_snapshot()
+    print(f"engine running in {a.mode} mode (Ctrl+C to stop); last session {engine._last_day}")
+    last_reload = last_pub = 0.0
+    try:
+        while True:
+            now = _t.time()
+            engine.check_external_commands()
+            if engine.process_commands():
+                last_pub = now
+            if now - last_reload >= a.reload_sec:
+                engine.reload_data()
+                last_reload = now
+                days = engine.data.trading_days(feed)
+                if days and (engine._last_day is None or days[-1].date() > engine._last_day):
+                    row = engine.run_day(days[-1])
+                    print(f"{days[-1].date()} equity {row['equity']:,.0f} ladder {row['ladder']}")
+                    last_pub = now
+            if now - last_pub >= 5:
+                engine.publish_snapshot()
+                last_pub = now
+            engine.store.heartbeat("engine", now)
+            if a.once:
+                break
+            _t.sleep(a.interval)
+    except KeyboardInterrupt:
+        print("engine stopped; open trades keep their broker-side stops")
+    return 0
+
+
+def cmd_ui(a: argparse.Namespace) -> int:  # pragma: no cover - interactive
+    try:
+        from .ui.main_window import run_ui
+    except ImportError as exc:
+        print(f"PySide6 is required for the desktop UI: pip install PySide6 ({exc})")
+        return 2
+    return run_ui(a.config, a.refresh_ms)
 
 
 def cmd_status(a: argparse.Namespace) -> int:
@@ -251,6 +297,16 @@ def main(argv: list[str] | None = None) -> int:
             s.add_argument("--level", required=True, choices=["system", "drawdown", "strategy", "instrument"])
             s.add_argument("--scope", required=True); s.add_argument("--reason")
             s.add_argument("--confirm", action="store_true"); s.add_argument("--code")
+
+    s = sub.add_parser("engine", help="long-running engine that serves the desktop UI")
+    s.set_defaults(fn=cmd_engine)
+    s.add_argument("--config", default="config"); s.add_argument("--data")
+    s.add_argument("--mode", default="paper", choices=["paper", "live"]); s.add_argument("--api-key", default=None)
+    s.add_argument("--interval", type=float, default=1.0); s.add_argument("--reload-sec", type=float, default=60.0)
+    s.add_argument("--once", action="store_true", help="one cycle then exit (scripts / tests)")
+    s = sub.add_parser("ui", help="PySide6 desktop UI; attaches to the engine's state")
+    s.set_defaults(fn=cmd_ui)
+    s.add_argument("--config", default="config"); s.add_argument("--refresh-ms", type=int, default=1000)
 
     s = sub.add_parser("status"); s.set_defaults(fn=cmd_status); s.add_argument("--config", default="config")
     s = sub.add_parser("kill"); s.set_defaults(fn=cmd_kill); s.add_argument("--config", default="config")

@@ -9,5 +9,8 @@ PyYAML>=6.0
 # kiteconnect>=5.0
 # keyring>=24
 
+# Desktop UI (PRD s.12)
+PySide6>=6.6
+
 # Development / testing
 pytest>=8

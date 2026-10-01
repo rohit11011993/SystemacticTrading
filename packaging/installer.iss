@@ -23,4 +23,5 @@ Name: "{userdocs}\AlgoTrader\state"
 Name: "{userdocs}\AlgoTrader\reports"
 
 [Icons]
+Name: "{group}\AlgoTrader"; Filename: "{app}\AlgoTraderUI.exe"; Parameters: """{userdocs}\AlgoTrader\config"""
 Name: "{group}\AlgoTrader status"; Filename: "{app}\AlgoTrader.exe"; Parameters: "status --config ""{userdocs}\AlgoTrader\config"""

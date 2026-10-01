@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS trades (trade_id TEXT PRIMARY KEY, strategy TEXT, sta
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT, updated TEXT);
 CREATE TABLE IF NOT EXISTS heartbeats (process TEXT PRIMARY KEY, ts REAL);
 CREATE TABLE IF NOT EXISTS equity (day TEXT PRIMARY KEY, body TEXT);
+CREATE TABLE IF NOT EXISTS commands (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, actor TEXT,
+                                     kind TEXT, body TEXT, status TEXT, result TEXT);
 """
 
 
@@ -79,10 +81,13 @@ class StateStore:
                    (order.client_ref, order.status.value, order.strategy_id,
                     datetime.now().isoformat(), dumps(order)))
 
-    def load_orders(self, open_only: bool = False) -> list[dict[str, Any]]:
+    def load_orders(self, open_only: bool = False, limit: int | None = None) -> list[dict[str, Any]]:
         sql = "SELECT body FROM orders"
         if open_only:
             sql += " WHERE status NOT IN ('FILLED','CANCELLED','REJECTED','EXPIRED')"
+        sql += " ORDER BY updated DESC"
+        if limit:
+            sql += f" LIMIT {int(limit)}"
         return [json.loads(r[0]) for r in self._exec(sql)]
 
     def save_fill(self, fill: Any) -> None:
@@ -118,6 +123,34 @@ class StateStore:
 
     def save_equity(self, day: date, row: dict[str, Any]) -> None:
         self._exec("INSERT OR REPLACE INTO equity VALUES (?,?)", (day.isoformat(), dumps(row)))
+
+    def load_equity(self, limit: int = 2000) -> list[dict[str, Any]]:
+        rows = self._exec("SELECT body FROM equity ORDER BY day DESC LIMIT ?", (limit,))
+        return [json.loads(r[0]) for r in reversed(rows)]
+
+    # -- command queue (UI / CLI -> engine) ------------------------------------------------
+    # The desktop UI never talks to the broker or the gateway directly: it enqueues commands
+    # here and the engine applies them through the risk gateway (FR-7.1), then records the
+    # outcome. This keeps the UI optional - closing it never stops risk controls (PRD s.12).
+    def enqueue_command(self, kind: str, body: dict[str, Any], actor: str = "ui") -> int:
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO commands (ts, actor, kind, body, status, result) VALUES (?,?,?,?,?,?)",
+                (datetime.now().isoformat(), actor, kind, dumps(body), "PENDING", ""))
+            return int(cur.lastrowid)
+
+    def pending_commands(self) -> list[dict[str, Any]]:
+        rows = self._exec("SELECT id, ts, actor, kind, body FROM commands WHERE status='PENDING' ORDER BY id")
+        return [{"id": r[0], "ts": r[1], "actor": r[2], "kind": r[3], "body": json.loads(r[4])} for r in rows]
+
+    def complete_command(self, cid: int, status: str, result: str) -> None:
+        self._exec("UPDATE commands SET status=?, result=? WHERE id=?", (status, result, cid))
+
+    def commands(self, limit: int = 100) -> list[dict[str, Any]]:
+        rows = self._exec("SELECT id, ts, actor, kind, body, status, result FROM commands "
+                          "ORDER BY id DESC LIMIT ?", (limit,))
+        return [{"id": r[0], "ts": r[1], "actor": r[2], "kind": r[3], "body": json.loads(r[4]),
+                 "status": r[5], "result": r[6]} for r in rows]
 
     def close(self) -> None:
         with self._lock:

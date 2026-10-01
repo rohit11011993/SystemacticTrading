@@ -2,7 +2,7 @@
 $ErrorActionPreference = "Stop"
 python -m venv .build-venv
 .\.build-venv\Scripts\pip install --upgrade pip
-.\.build-venv\Scripts\pip install -r requirements.txt pyinstaller
+.\.build-venv\Scripts\pip install -r requirements.txt PySide6 pyinstaller
 .\.build-venv\Scripts\python -m pytest -q                       # release gate: tests must pass
 .\.build-venv\Scripts\pyinstaller packaging\AlgoTrader.spec --clean --noconfirm --distpath dist --workpath build
 # Record release hashes (FR-13.8)

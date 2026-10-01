@@ -129,7 +129,9 @@ class RangeIronCondor(Strategy):
         if ctx.calendar.events_between(ctx.today, expiry):
             return "scheduled event entered the holding window"
         if m is None:
-            return None
+            # Without marks the loss and delta exits cannot be evaluated: a defined-risk
+            # structure that cannot be monitored is closed rather than held blind.
+            return "cannot mark the structure (missing option quotes)"
         credit = trade.meta["credit"]
         if m["pnl"] >= p.take_profit * credit:
             return f"profit target {p.take_profit:.0%} of credit"

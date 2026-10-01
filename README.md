@@ -22,10 +22,46 @@ python -m algotrader backtest --today-costs             # same, priced at today'
 python -m algotrader backtest --cost-mult 1.5           # cost-stress test (strategy doc s.11)
 python -m algotrader drill                              # rehearse all four kill-switch levels
 python -m algotrader run-day --date 2026-09-30          # one paper session, persistent state
+python -m algotrader engine                             # long-running engine (serves the UI)
+python -m algotrader ui                                 # PySide6 desktop UI
 python -m algotrader status                             # blotter + kill-switch states
 python -m algotrader kill --flatten                     # the big red button
-python -m pytest -q                                     # 66 tests (risk, OMS, kill switches...)
+python -m pytest -q                                     # 72 tests (risk, OMS, kill switches, UI...)
 ```
+
+## Desktop UI
+
+![Dashboard](docs/ui-dashboard.png)
+
+`algotrader ui` opens the PySide6 desktop application (PRD s.12). It **attaches** to the engine
+through the state database. The engine publishes a snapshot every cycle, and the UI sends
+operator commands to a queue that the engine applies **through the risk gateway**. The UI never
+talks to the broker, so closing the window never stops risk controls or open-trade management.
+Run `algotrader engine` (paper or live) alongside it. Commands are picked up within about a second.
+If the engine is offline, the header says so and commands wait in the queue.
+
+| Screen | What it does |
+|---|---|
+| Dashboard | NAV, day/week/month PnL, drawdown and ladder state, gauges for margin, gross, net and open risk, health of engine/data/broker/session/gateway/reconciliation, regime and permission table, equity curve, alerts |
+| Active trades | The blotter (PnL, R, risk, MFE/MAE, data age), alignment indicator with failing checks and history, legs. Exit at market, 25% / 50% / custom partial, tighten stop, exit by strategy or instrument |
+| Kill switches | All active trips. Manual trips at any level/action. Reset workflow: written reason, then cooling-off, then confirmation, with the external one-time code for RED/BLACK |
+| Strategies | Stage, mode, state (active/paused/blocked with reasons), PnL, hit rate, risk used vs share, multipliers, parameters, plugin hash. Pause, resume, exit all |
+| Instruments | Registry with versioned specs, last price, F&O-ban / circuit flags (set or clear) |
+| Risk & limits | Usage gauges, effective strictest-wins limits per binding, proposing limit changes (tightening is immediate, loosening is cooled off and must be confirmed) |
+| Orders & fills | Order book with state, rejections and slippage, plus the operator-command log with results |
+| Research | Backtests in a background thread (date range, strategies, today's costs, cost multiplier), chart against the paper/live equity, trade list |
+| Audit & logs | Searchable audit trail, raw record view, hash-chain verification |
+| Settings | Paths, config hash, broker/static-IP info, revoking tokens, theme, per-event alert toggles, About (plugin hashes) |
+
+* **KILL**, **FLATTEN + HALT** and **EXIT ALL** are visible on every page (FR-12.2). Shortcuts:
+  Ctrl+K kill, Ctrl+Shift+F flatten, Ctrl+Shift+X exit all, Ctrl+E exit the selected trade,
+  Ctrl+1..0 switch screens, F5 refresh, Ctrl+T toggle theme.
+* Every destructive action shows the consequence in rupees (PnL realised, estimated charges and
+  slippage). Whole-book exit and flatten need a second, typed confirmation (FR-12.3, PRD s.8).
+* State is always shown as text plus an icon (● ▲ ✖), never by colour alone (FR-12.4). There
+  are light and dark themes, and window size, current screen and column layouts are saved (FR-12.5).
+* Kill-switch events, red alignment, reconciliation mismatches, limits near their cap and a lost
+  engine heartbeat raise desktop notifications. Each can be switched off in Settings (FR-8.4, FR-12.6).
 
 ## Architecture
 
@@ -53,7 +89,8 @@ market data ─► engine ─► strategies (plugins) ─► Signals
 | `algotrader/backtest.py`, `research.py` | Reports; Monte Carlo drawdown, top-trade removal, deflated Sharpe, plateau grid, walk-forward windows | Strategy doc s.11 |
 | `plugins/` | S1–S5 strategy plugins (loaded from outside the package/executable) | Strategy doc s.5–9 |
 | `config/` | All limits, costs, instruments, allocations, kill-switch triggers, bindings, events | NFR-9 |
-| `packaging/` | PyInstaller one-folder spec, Inno Setup installer, scripted build | R2, FR-13.x |
+| `algotrader/ui/` | PySide6 desktop UI: Qt-free bridge (snapshot + command queue), ten screens, theme, widgets | R5, PRD s.12 |
+| `packaging/` | PyInstaller one-folder spec (`AlgoTrader.exe` + windowed `AlgoTraderUI.exe`), Inno Setup installer, scripted build | R2, FR-13.x |
 
 ## Strategies
 
@@ -85,10 +122,12 @@ options_structure → risk_per_trade → allocation → position_size → liquid
 
 These are not implemented, and they are listed here rather than glossed over:
 
-* **Desktop UI (PySide6).** Only the text blotter (`status`, `run-day`) exists. `monitoring.blotter`
-  produces the row model the UI would render.
-* **Separate gateway process over IPC.** The gateway runs in-process with the engine. Its API
-  has no transport dependency, but the authenticated local IPC server (FR-12.1, FR-15.4) is not written.
+* **Separate gateway process over IPC.** The gateway runs in-process with the engine. The UI
+  attaches through the local state database (SQLite, WAL mode) rather than an authenticated
+  socket. Anyone who can write that file can queue commands, but those commands still pass the
+  risk gateway. The authenticated IPC transport of FR-12.1 / FR-15.4 is not written.
+* **Intraday updates in the UI** depend on the engine. With daily bars, prices and PnL change
+  once per session, and manual exits fill at the next session in paper mode.
 * **Kite adapter has not been tested against the live API.** Field names, `market_protection`,
   AMO handling and rate limits must be checked against current Kite docs. The instrument-master
   refresh still needs the broker's trading symbol mapped into `data_symbol`.

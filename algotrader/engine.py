@@ -48,7 +48,8 @@ from .monitoring.reconcile import reconcile
 from .portfolio.book import Book, new_trade
 from .portfolio.sizing import VolTargetOverlay, lots_for_risk
 from .regime import RegimeEngine
-from .risk.gateway import RiskContext, RiskGateway
+from .monitoring.blotter import blotter_rows
+from .risk.gateway import LimitChangeManager, RiskContext, RiskGateway
 from .risk.killswitch import KillSwitchManager, KSAction, KSLevel
 from .strategy.base import Context, Strategy
 
@@ -120,6 +121,8 @@ class TradingEngine:
         self._frames: dict[str, pd.DataFrame] = {}
         self._overlay_scale = 1.0
         self.regime_log: list[dict[str, Any]] = []
+        self.paused: set[str] = set()                  # strategies paused by the operator
+        self.limits = LimitChangeManager(cfg.risk, audit, self.now, cfg.killswitch.loosen_cooloff_hours)
 
     # ------------------------------------------------------------------------------------
     # Clock, prices, NAV
@@ -185,6 +188,8 @@ class TradingEngine:
         self._new_day(day)
         if self.mode is not Mode.BACKTEST:
             self.check_external_commands()
+            self.process_commands()
+            self.limits.apply_due()
         keys = self._tradable_keys()
         bars = {k: b for k in keys if (b := self._bar_on(k, ts)) is not None}
 
@@ -234,7 +239,7 @@ class TradingEngine:
         # 6. Strategies.
         self._overlay_scale = self.overlay.scale([e for _, e in self.equity_curve] + [equity])
         for bs in self.strategies:
-            if not bs.binding.enabled:
+            if not bs.binding.enabled or bs.id in self.paused:
                 continue
             ctx = self._context(bs, ts)
             try:
@@ -260,6 +265,7 @@ class TradingEngine:
         self.store.save_equity(day, row)
         if self.mode is not Mode.BACKTEST:
             self.save_state()
+            self.publish_snapshot()
         self.store.heartbeat("engine", _time.time())
         return row
 
@@ -274,6 +280,8 @@ class TradingEngine:
         self.store.set("regime", self.regime.to_dict())
         self.store.set("ladder", {"state": self.ks.ladder_state, "peak": self.ks.ladder_peak})
         self.store.set("stop_orders", self.stop_orders)
+        self.store.set("paused_strategies", sorted(self.paused))
+        self.store.set("quotes", {s: [q.last, q.ts.isoformat(), q.bid, q.ask] for s, q in self.rc.quotes.items()})
         self.store.set("engine", {"strategy_peaks": self.strategy_peaks, "last_day": self._last_day,
                                   "equity_curve": [(d.isoformat(), e) for d, e in self.equity_curve[-300:]]})
 
@@ -299,6 +307,11 @@ class TradingEngine:
         self.equity_curve = [(date.fromisoformat(d), e) for d, e in eng.get("equity_curve", [])]
         if eng.get("last_day"):
             self._last_day = date.fromisoformat(eng["last_day"])
+            self._now = datetime.combine(self._last_day, CLOSE_TIME)
+        self.paused = set(self.store.get("paused_strategies", []) or [])
+        for sym, (last, ts, bid, ask) in (self.store.get("quotes", {}) or {}).items():
+            self.rc.quotes[sym] = Quote(sym, last, datetime.fromisoformat(ts), bid, ask)
+        self._invalidate_nav()
         open_trades = self.book.open_trades()
         if isinstance(self.broker, PaperBroker):
             self.broker.restore_positions(self.book.net_positions())
@@ -321,6 +334,170 @@ class TradingEngine:
                          cmd.get("reason", "external kill"), actor=cmd.get("actor", "operator"))
             cmd["handled"] = True
             self.store.set("external_kill", cmd)
+
+    # ------------------------------------------------------------------------------------
+    # Operator commands (desktop UI / CLI -> engine) and the published UI snapshot
+    # ------------------------------------------------------------------------------------
+    def process_commands(self) -> int:
+        """Apply queued operator commands. Every action still goes through the risk gateway
+        (exits as risk-reducing orders) and is written to the audit log with its outcome."""
+        n = 0
+        for cmd in self.store.pending_commands():
+            kind, body, actor = cmd["kind"], cmd["body"], cmd["actor"]
+            try:
+                ok, result = self._apply_command(kind, body, actor)
+            except Exception as exc:  # noqa: BLE001 - a bad command must not stop the engine
+                log.exception("command %s failed", kind)
+                ok, result = False, f"error: {exc}"
+            self.store.complete_command(cmd["id"], "DONE" if ok else "FAILED", result)
+            self.audit.record("operator_command", actor, {"kind": kind, "body": body, "ok": ok,
+                              "result": result}, ts=self._now)
+            n += 1
+        if n and self.mode is not Mode.BACKTEST:
+            self.save_state()
+            self.publish_snapshot()
+        return n
+
+    def _apply_command(self, kind: str, b: dict[str, Any], actor: str) -> tuple[bool, str]:
+        reason = (b.get("reason") or "").strip()
+        if kind == "manual_exit":
+            ok = self.manual_exit(b["trade_id"], float(b.get("fraction", 1.0)), reason)
+            return ok, "exit order sent" if ok else "exit not sent (closed, already exiting or blocked)"
+        if kind == "exit_all":
+            n = self.exit_all(b.get("strategy"), b.get("instrument"), reason)
+            return True, f"exit orders sent for {n} trade(s)"
+        if kind == "adjust_stop":
+            t = self.book.get(b["trade_id"])
+            before = t.stop_price if t else None
+            self._adjust_stop(b["trade_id"], float(b["stop"]))
+            after = t.stop_price if t else None
+            return after != before, f"stop {before} -> {after}" if after != before else \
+                "rejected: a stop can only move in the direction of lower risk"
+        if kind == "kill":
+            self.ks.trip(KSLevel.SYSTEM, "system", KSAction.FLATTEN if b.get("flatten") else KSAction.BLOCK_ENTRIES,
+                         reason or "manual system kill", actor=actor)
+            self._execute_killswitch_actions()
+            return True, "system kill switch tripped"
+        if kind == "trip":
+            level = KSLevel(b["level"])
+            action = KSAction[b.get("action", "BLOCK_ENTRIES")]
+            self.ks.trip(level, b["scope"], action, reason or f"manual {level.value} trip", actor=actor)
+            self._execute_killswitch_actions()
+            return True, f"{level.value}:{b['scope']} {action.name}"
+        if kind == "reset_request":
+            msg = self.ks.request_reset(KSLevel(b["level"]), b["scope"], reason, actor)
+            return "cooling-off" in msg, msg
+        if kind == "reset_confirm":
+            return self.ks.confirm_reset(KSLevel(b["level"]), b["scope"], actor, b.get("code"), equity=self.nav())
+        if kind == "pause_strategy":
+            self.paused.add(b["strategy"])
+            return True, f"{b['strategy']} paused: no new signals (open trades keep their exits)"
+        if kind == "resume_strategy":
+            self.paused.discard(b["strategy"])
+            return True, f"{b['strategy']} resumed"
+        if kind == "instrument_flag":
+            flags = {k: bool(v) for k, v in b.items() if k in ("banned", "circuit")}
+            self.registry.set_flag(b["instrument"], **flags)
+            return True, f"{b['instrument']} flags {flags}"
+        if kind == "propose_limit":
+            ch = self.limits.propose(b["level"], b.get("scope"), b["key"], b["value"], reason, actor)
+            return True, ("applied immediately (tightening)" if ch.applied else
+                          f"loosening #{ch.change_id}: needs confirmation, effective {ch.effective:%Y-%m-%d %H:%M}")
+        if kind == "confirm_limit":
+            self.limits.confirm(int(b["change_id"]), actor)
+            return True, f"change #{b['change_id']} confirmed; applies after the cooling-off"
+        return False, f"unknown command '{kind}'"
+
+    def snapshot(self) -> dict[str, Any]:
+        """Everything the desktop UI shows, as plain JSON-able data (PRD s.8 and s.12)."""
+        prices = self.prices()
+        nav = self.nav()
+        eq = [e for _, e in self.equity_curve] or [self.capital]
+        peak = max(eq + [nav])
+        rows = blotter_rows(self.book.open_trades(), prices, nav, self._now)
+        for r in rows:
+            t = self.book.get(r["trade_id"])
+            q = self.rc.quotes.get(t.primary.symbol) if t else None
+            r["data_age_s"] = (self._now - q.ts).total_seconds() if q else None
+            r["risk_now"] = self.book.trade_risk(t, prices) if t else None
+            r["status"] = t.status if t else None
+            r["legs_detail"] = [{"symbol": s, "qty": l.qty, "avg": l.avg_price, "last": prices.get(s)}
+                                for s, l in t.legs.items()] if t else []
+            r["alignment_history"] = (t.alignment[-15:] if t else [])
+            r["reason"] = t.reason if t else ""
+            r["working_exit"] = bool(t and self.oms.open_orders(t.trade_id, Purpose.EXIT))
+        gross = net = 0.0
+        for _, leg in self.book.legs():
+            if leg.contract is None and leg.qty:
+                notional = leg.qty * (prices.get(leg.symbol) or leg.avg_price)
+                gross += abs(notional)
+                net += notional * self.registry.get(leg.instrument).beta
+        margin = self.rc.margin_used()
+        g = self.cfg.risk.global_limits
+        budget = self.cfg.portfolio.book_risk_budget_pct / 100 * nav
+        strategies = []
+        for bs in self.strategies:
+            alloc = self.cfg.portfolio.strategies[bs.id]
+            closed = self.book.closed_trades(bs.id)
+            wins = sum(1 for t in closed if t.realized() - t.charges > 0)
+            strategies.append({
+                "id": bs.id, "version": bs.strategy.version, "stage": bs.binding.stage,
+                "mode": bs.binding.mode.value, "enabled": bs.binding.enabled, "paused": bs.id in self.paused,
+                "instruments": bs.binding.instruments, "pnl": self.book.strategy_pnl(bs.id, prices),
+                "open": len([t for t in self.book.open_trades(bs.id) if t.meta.get("role") != "hedge"]),
+                "closed": len(closed), "hit_rate": wins / len(closed) if closed else None,
+                "risk_used": self.book.open_risk(prices, [bs.id]), "risk_cap": alloc.risk_share * budget,
+                "risk_multiplier": self.ks.risk_multiplier(bs.id), "blocked": self.ks.entry_block_reasons(bs.id),
+                "family": alloc.family, "plugin_hash": bs.plugin_hash[:12],
+                "permission": self.regime.permission(bs.id), "params": bs.strategy.params.model_dump()})
+        h = self.rc.health
+        last = self.equity_curve[-1][1] if self.equity_curve else self.capital
+        return {
+            "ts": self._now.isoformat(), "published": datetime.now().isoformat(), "mode": self.mode.value,
+            "capital": self.capital, "nav": nav, "day_pnl": nav - self.day_start_equity,
+            "week_pnl": nav - self.week_start_equity,
+            "month_pnl": nav - next((e for d, e in self.equity_curve if d.month == self._now.month
+                                     and d.year == self._now.year), last),
+            "peak": peak, "drawdown_pct": (nav / peak - 1) * 100 if peak else 0.0,
+            "ladder": self.ks.ladder_state, "margin_used": margin,
+            "margin_util_pct": margin / nav * 100 if nav else 0.0,
+            "margin_cap_pct": g.get("max_margin_util_pct", 40), "gross": gross, "net_beta": net,
+            "gross_cap": g.get("max_gross_exposure_pct_nav", 0) / 100 * nav,
+            "net_cap": g.get("max_net_exposure_pct_nav", 0) / 100 * nav,
+            "book_risk": self.book.open_risk(prices), "book_risk_budget": budget,
+            "health": {"data": h.data_connected, "broker": h.broker_connected, "session": h.session_valid,
+                       "reconciled": h.reconciled, "gateway": True},
+            "regime": {"name": self.regime.current.value if self.regime.current else None,
+                       "er": self.regime.last.er, "vix_pct": self.regime.last.vix_pct,
+                       "pending": self.regime.pending.value if self.regime.pending else None,
+                       "permissions": self.regime.permission_table()},
+            "kill_switches": [{"level": t.level.value, "scope": t.scope, "action": t.action.name,
+                               "reason": t.reason, "ts": t.ts.isoformat(), "external_key": t.external_key,
+                               "manual_reset": t.manual_reset, "until": t.until.isoformat() if t.until else None,
+                               "reset_requested": t.reset_requested_at.isoformat() if t.reset_requested_at else None}
+                              for t in self.ks.trips.values()],
+            "trades": rows, "strategies": strategies,
+            "prices": {s: {"last": q.last, "ts": q.ts.isoformat()} for s, q in self.rc.quotes.items()},
+            "alerts": list(dict.fromkeys(self.alerts))[-50:],
+            "pending_limit_changes": [{"id": c.change_id, "level": c.level, "scope": c.scope, "key": c.key,
+                                       "old": c.old, "new": c.new, "reason": c.reason,
+                                       "effective": c.effective.isoformat(), "confirmed": c.confirmed}
+                                      for c in self.limits.pending.values()],
+            "instrument_flags": {i.key: {"banned": i.flags.banned, "circuit": i.flags.circuit}
+                                 for i in self.registry.all()},
+            "recent_alignment_red": sum(1 for r in rows if r["alignment"] == "OFF_THESIS"),
+            "config_hash": self.cfg.config_hash,
+        }
+
+    def reload_data(self) -> None:
+        """Drop cached bars so a long-running engine sees newly downloaded sessions."""
+        self._frames.clear()
+        cache = getattr(self.data, "_cache", None)
+        if isinstance(cache, dict):
+            cache.clear()
+
+    def publish_snapshot(self) -> None:
+        self.store.set("ui_snapshot", self.snapshot())
 
     def _new_day(self, day: date) -> None:
         if self._last_day is not None:

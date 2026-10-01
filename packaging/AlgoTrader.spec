@@ -33,4 +33,14 @@ exe = EXE(
     disable_windowed_traceback=False,
     codesign_identity=None,      # sign with signtool after the build (FR-13.3)
 )
-coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="AlgoTrader")
+
+# Desktop UI (PRD s.12): a separate windowed executable in the same folder. It attaches to the
+# engine through the state database, so closing it never stops the engine.
+ui = Analysis(["launcher_ui.py"], pathex=[".."], hiddenimports=hidden + ["PySide6.QtWidgets", "PySide6.QtGui"],
+              excludes=["tkinter", "matplotlib", "IPython", "pytest"])
+ui_pyz = PYZ(ui.pure)
+ui_exe = EXE(ui_pyz, ui.scripts, [], exclude_binaries=True, name="AlgoTraderUI", console=False,
+             codesign_identity=None)
+
+coll = COLLECT(exe, a.binaries, a.datas, ui_exe, ui.binaries, ui.datas, strip=False, upx=False,
+               name="AlgoTrader")
