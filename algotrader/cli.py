@@ -6,6 +6,7 @@ Sub-commands
   validate-config  run the configuration validator (FR-7.6)
   backtest         run a backtest; optionally at today's cost rates or with cost stress
   run-day          run one session in paper (or live) mode with persistent state
+  replay           run paper sessions over a date range with persistent state (demo)
   status           print the active-trade blotter and kill-switch states
   kill             the operator's big red button (system kill switch)
   reset            request / confirm a kill-switch reset (reason + cooling-off + key)
@@ -119,6 +120,24 @@ def cmd_run_day(a: argparse.Namespace) -> int:
     print(render_text(blotter_rows(engine.book.open_trades(), engine.prices(), engine.nav(), engine.now())))
     for msg in dict.fromkeys(engine.alerts):
         print(f"ALERT: {msg}")
+    return 0
+
+
+def cmd_replay(a: argparse.Namespace) -> int:
+    """Run consecutive paper sessions over a date range with persistent state, so the engine
+    and desktop UI have positions and history to show (demo / rehearsal)."""
+    engine = _engine_for_session(a)
+    feed = engine.registry.get(engine.cfg.portfolio.regime.market_series).feed
+    days = engine.data.trading_days(feed, _date(a.start), _date(a.end))
+    if engine._last_day:
+        days = [d for d in days if d.date() > engine._last_day]
+    for i, ts in enumerate(days):
+        row = engine.run_day(ts)
+        if i % 20 == 0 or i == len(days) - 1:
+            print(f"{ts.date()} equity {row['equity']:,.0f} open trades {row['open_trades']} ladder {row['ladder']}")
+    print(f"replayed {len(days)} session(s); start `engine` and `ui` to inspect the result")
+    if a.wait:      # keep the console open when launched from a Start Menu shortcut
+        input("Press Enter to close...")
     return 0
 
 
@@ -297,6 +316,13 @@ def main(argv: list[str] | None = None) -> int:
             s.add_argument("--level", required=True, choices=["system", "drawdown", "strategy", "instrument"])
             s.add_argument("--scope", required=True); s.add_argument("--reason")
             s.add_argument("--confirm", action="store_true"); s.add_argument("--code")
+
+    s = sub.add_parser("replay", help="run paper sessions over a date range with persistent state")
+    s.set_defaults(fn=cmd_replay)
+    s.add_argument("--config", default="config"); s.add_argument("--data")
+    s.add_argument("--mode", default="paper", choices=["paper"]); s.add_argument("--api-key", default=None)
+    s.add_argument("--start", default="2026-01-01"); s.add_argument("--end")
+    s.add_argument("--wait", action="store_true", help="wait for Enter before exiting")
 
     s = sub.add_parser("engine", help="long-running engine that serves the desktop UI")
     s.set_defaults(fn=cmd_engine)

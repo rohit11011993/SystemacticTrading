@@ -1,0 +1,71 @@
+# Builds the Windows installer on a GitHub-hosted Windows machine (PRD s.13, FR-13.1):
+# tests on Windows -> PyInstaller one-folder build -> smoke test of the .exe -> Inno Setup
+# installer -> downloadable artifact "AlgoTrader-Setup".
+name: Windows installer
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt PySide6 pyinstaller
+
+      - name: Run the test suite on Windows (release gate)
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q
+
+      - name: Build AlgoTrader.exe and AlgoTraderUI.exe (PyInstaller, one-folder)
+        run: pyinstaller packaging\AlgoTrader.spec --clean --noconfirm --distpath dist --workpath build
+
+      - name: Smoke-test the frozen executable
+        shell: pwsh
+        run: |
+          $exe = "dist\AlgoTrader\AlgoTrader.exe"
+          & $exe validate-config --config config;               if ($LASTEXITCODE) { exit 1 }
+          & $exe make-synthetic --out smoke-data;               if ($LASTEXITCODE) { exit 1 }
+          & $exe drill --config config --data smoke-data;       if ($LASTEXITCODE) { exit 1 }
+          & $exe backtest --config config --data smoke-data --start 2025-06-01 --out smoke-reports
+          if ($LASTEXITCODE) { exit 1 }
+
+      - name: Record release hashes (FR-13.8)
+        shell: pwsh
+        run: |
+          Get-FileHash dist\AlgoTrader\AlgoTrader.exe, dist\AlgoTrader\AlgoTraderUI.exe -Algorithm SHA256 |
+            Format-Table -AutoSize | Out-String | Set-Content dist\RELEASE_HASHES.txt
+          "commit $env:GITHUB_SHA" | Add-Content dist\RELEASE_HASHES.txt
+          Get-Content dist\RELEASE_HASHES.txt
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" packaging\installer.iss
+          if ($LASTEXITCODE) { exit 1 }
+          Copy-Item dist\RELEASE_HASHES.txt dist\installer\
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AlgoTrader-Setup
+          path: dist/installer/
+          retention-days: 30
