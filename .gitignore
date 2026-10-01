@@ -2,10 +2,12 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .ruff_cache/
-# runtime folders (user data, generated)
-state/
-reports/
-data/
-build/
-dist/
+.venv/
+# Runtime folders at the repository root only (user data, generated output).
+# Anchored with "/" so package folders such as algotrader/data/ are NOT ignored.
+/data/
+/state/
+/reports/
+/build/
+/dist/
 *.egg-info/
