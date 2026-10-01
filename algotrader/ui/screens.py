@@ -825,7 +825,16 @@ class SettingsScreen(Screen):
 
     def __init__(self, win):
         super().__init__(win)
-        lay = QVBoxLayout(self)
+        # Settings is long: put it in a scroll area so it fits small screens.
+        from PySide6.QtWidgets import QScrollArea
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        body = QWidget()
+        scroll.setWidget(body)
+        outer.addWidget(scroll)
+        lay = QVBoxLayout(body)
         cfg = self.bridge.cfg
         paths = QGroupBox("Paths and configuration")
         pl = QFormLayout(paths)
@@ -836,18 +845,9 @@ class SettingsScreen(Screen):
             pl.addRow(label, QLabel(val))
         lay.addWidget(paths)
 
-        broker = QGroupBox("Broker connection (REG-1 / REG-2)")
-        bl = QFormLayout(broker)
-        bl.addRow("Static IP", QLabel(cfg.system.static_ip or "not set (paper/backtest)"))
-        bl.addRow("Login deadline", QLabel(str(cfg.system.login_deadline)))
-        bl.addRow("Orders per second", QLabel(str(cfg.system.orders_per_second)))
-        revoke = QPushButton("Revoke stored broker session tokens")
-        revoke.setObjectName("Danger")
-        revoke.clicked.connect(self._revoke)
-        bl.addRow(revoke)
-        bl.addRow(QLabel("Daily login: complete the Kite OAuth + 2FA flow in the browser; the token is "
-                         "stored in Windows Credential Manager."))
-        lay.addWidget(broker)
+        from .broker_panel import BrokerPanel
+        self.broker = BrokerPanel(win)
+        lay.addWidget(self.broker)
 
         ui = QGroupBox("Display and alerts")
         ul = QFormLayout(ui)
@@ -884,14 +884,3 @@ class SettingsScreen(Screen):
 
     def refresh(self, snap):
         self.plugins.setText("  ".join(f"{s['id'].split('_')[0]}:{s['plugin_hash']}" for s in snap["strategies"]))
-
-    def _revoke(self):
-        if not self.win.confirm_action("Revoke session", "Revoke all stored broker tokens?",
-                                       "Trading stops until the next daily login. Also revoke at the broker side."):
-            return
-        try:
-            from ..execution.kite import KiteAuth
-            KiteAuth.revoke()
-            self.win.status("broker tokens revoked")
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.warning(self, "Revoke", f"Could not revoke: {exc}")

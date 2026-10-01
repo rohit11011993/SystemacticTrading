@@ -100,6 +100,8 @@ class SystemConfig(BaseModel):
     orders_per_second: float = 2.0            # REG-4 ceiling, far below 10
     broker_requests_per_second: float = 8.0   # vendor limit (FR-6.7), re-verify per release
     static_ip: str | None = None              # REG-1; None disables the check (backtest/paper)
+    kite_redirect_url: str = "http://127.0.0.1:5010/kite"   # must match your Kite Connect app
+    send_algo_id: bool = False                # REG-3: true once the broker has issued real algo IDs
     login_deadline: time = time(8, 45)        # FR-6.3 pre-open alert if no session by then
     sessions: dict[str, SessionWindow] = Field(default_factory=lambda: {"NSE": SessionWindow()})
     max_clock_drift_sec: float = 2.0          # FR-11.6

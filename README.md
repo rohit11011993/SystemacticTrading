@@ -63,6 +63,41 @@ If the engine is offline, the header says so and commands wait in the queue.
 * Kill-switch events, red alignment, reconciliation mismatches, limits near their cap and a lost
   engine heartbeat raise desktop notifications. Each can be switched off in Settings (FR-8.4, FR-12.6).
 
+## Connecting Zerodha Kite
+
+You need a **Kite Connect app**: sign in at https://developers.kite.trade, choose *Create new app*
+(Kite Connect is a paid subscription; check Zerodha's current pricing), and set its **Redirect URL**
+to exactly `http://127.0.0.1:5010/kite` (the `kite_redirect_url` in `config/system.yaml`).
+
+In the UI go to **Settings → Broker: Zerodha Kite Connect**, or use the commands:
+
+| Step | UI button | Command | How often |
+|---|---|---|---|
+| 1 | Set API key & secret | `AlgoTrader.exe kite-setup` | once |
+| 2 | Log in to Kite | `AlgoTrader.exe kite-login` | every trading day |
+| 3 | Check connection | `AlgoTrader.exe kite-check` | after login |
+| 4 | Update instruments | `AlgoTrader.exe kite-instruments` | daily (contracts roll, lots change) |
+| 5 | Download history | `AlgoTrader.exe kite-fetch-data --start 2018-01-01` | when you want real data |
+
+* The API key, secret and daily token are stored in **Windows Credential Manager**. They never go
+  into config files or logs. Logins are written to the audit log, with identifiers masked.
+* Login happens in your own browser with your password and 2FA. AlgoTrader never automates 2FA.
+  It picks up the redirect automatically. If the browser shows an error page after login, paste
+  that page's address with **Paste login address**.
+* `kite-check` reports the account name, whether each exchange segment the bindings need
+  (NFO, MCX, CDS) is enabled, and the static-IP status.
+* `kite-instruments` maps each instrument to the current contract, rolling a set number of
+  trading days before expiry, and reports lot or tick sizes that differ from `instruments.yaml`.
+  The exchange values are the ones used.
+* `kite-fetch-data` downloads **continuous** daily futures history plus India VIX into the data
+  folder. The demo files are kept in `data/_demo_backup`. Delete the `state` folder before paper
+  trading on real data so demo trades aren't mixed in.
+* **Logging in does not start live trading.** Live mode also needs `static_ip`, refreshed
+  contracts, approved plugins (`approve-plugins`) and bindings at stage `live_reduced` or `live`.
+
+This flow is tested against a simulated Kite client. It has not been run against a real Kite
+account yet, so treat your first real login as a test and report anything that breaks.
+
 ## Architecture
 
 ```
@@ -128,9 +163,9 @@ These are not implemented, and they are listed here rather than glossed over:
   risk gateway. The authenticated IPC transport of FR-12.1 / FR-15.4 is not written.
 * **Intraday updates in the UI** depend on the engine. With daily bars, prices and PnL change
   once per session, and manual exits fill at the next session in paper mode.
-* **Kite adapter has not been tested against the live API.** Field names, `market_protection`,
-  AMO handling and rate limits must be checked against current Kite docs. The instrument-master
-  refresh still needs the broker's trading symbol mapped into `data_symbol`.
+* **Kite has not been tested against a real account.** Setup, login, contract mapping and
+  history download are tested against a simulated client only. Order placement (AMO handling,
+  `market_protection`, rate limits) must be checked in paper and reduced-size live trading.
 * **Option chains are modelled** with Black-Scholes and India VIX (`data/options.py`) until a
   historical chain source is chosen (strategy doc open question 3).
 * **Futures rolling** assumes continuous back-adjusted series. Live roll execution and roll-cost

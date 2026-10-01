@@ -78,6 +78,7 @@ class Instrument(BaseModel):
     data_source: str = "csv"
     data_symbol: str | None = None  # file / feed name; defaults to the key
     broker_token: str | None = None
+    broker_symbol: str | None = None   # name at the broker if different (Kite: "INDIA VIX")
     tradable: bool = True
 
     @model_validator(mode="after")

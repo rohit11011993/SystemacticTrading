@@ -5,9 +5,9 @@ pandas>=2.1
 pydantic>=2.5
 PyYAML>=6.0
 
-# Optional: live broker (Zerodha Kite Connect) and secure token storage
-# kiteconnect>=5.0
-# keyring>=24
+# Broker (Zerodha Kite Connect) and secure credential storage (Windows Credential Manager)
+kiteconnect>=5.0
+keyring>=24
 
 # Desktop UI (PRD s.12)
 PySide6>=6.6

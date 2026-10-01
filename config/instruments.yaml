@@ -49,6 +49,7 @@ instruments:
     type: index
     specs: [{effective: 2019-01-01, lot_size: 1, tick_size: 0.0025}]
     cost_profile: equity_futures
+    broker_symbol: INDIA VIX
     tradable: false
 
   NIFTY_OPT:

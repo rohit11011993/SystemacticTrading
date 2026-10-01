@@ -110,14 +110,21 @@ class KiteBroker(BrokerGateway):
     name = "kite"
 
     def __init__(self, api_key: str, access_token: str,
-                 symbol_map: Callable[[str], tuple[str, str]], market_protection: float = 2.0,
-                 exit_only: bool = False):
+                 symbol_map: Callable[[str], tuple[str, str]], market_protection: float = -1,
+                 exit_only: bool = False, reverse_map: dict[str, str] | None = None,
+                 send_algo_id: bool = False):
         kc_mod = _kite_module()
         self.kc = kc_mod.KiteConnect(api_key=api_key)
         self.kc.set_access_token(access_token)
         self.symbol_map = symbol_map
         self.market_protection = market_protection
         self.exit_only = exit_only
+        # Kite reports positions/fills by tradingsymbol; map them back to internal symbols so
+        # reconciliation compares like with like (FR-11.3).
+        self.reverse_map = reverse_map or {}
+        # REG-3: pass the exchange-assigned algo ID only once the broker has issued real IDs
+        # (system.yaml algo_tags); placeholder IDs would be rejected.
+        self.send_algo_id = send_algo_id
         self._seen_trades: set[str] = set()
         self._last_status: dict[str, str] = {}
         self._ref_by_id: dict[str, str] = {}
@@ -128,13 +135,15 @@ class KiteBroker(BrokerGateway):
             variety=self.kc.VARIETY_REGULAR, exchange=exchange, tradingsymbol=tsym,
             transaction_type=order.side.value, quantity=order.qty, product=order.product.value,
             order_type=order.order_type.value, validity=self.kc.VALIDITY_DAY,
-            tag=order.algo_tag[:20])
+            tag=order.strategy_id[:20])
+        if self.send_algo_id:
+            params["algo_id"] = order.algo_tag
         if order.order_type is OrderType.LIMIT:
             params["price"] = order.limit_price
         if order.order_type is OrderType.SL_M:
             params["trigger_price"] = order.trigger_price
         if order.order_type is OrderType.MARKET:
-            params["market_protection"] = self.market_protection   # verify against current API
+            params["market_protection"] = self.market_protection   # -1 = exchange/broker automatic
         try:
             oid = str(self.kc.place_order(**params))
         except Exception as exc:  # noqa: BLE001 - vendor exceptions are mapped below
@@ -171,7 +180,7 @@ class KiteBroker(BrokerGateway):
                 continue
             self._seen_trades.add(tid)
             ref = self._ref_by_id.get(str(t["order_id"]), f"external:{t['order_id']}")
-            fills.append(Fill(ref, str(t["order_id"]), t["tradingsymbol"],
+            fills.append(Fill(ref, str(t["order_id"]), self.reverse_map.get(t["tradingsymbol"], t["tradingsymbol"]),
                               OrderSide(t["transaction_type"]), int(t["quantity"]),
                               float(t["average_price"]),
                               pd.Timestamp(t.get("fill_timestamp") or datetime.now()).to_pydatetime()))
@@ -189,7 +198,8 @@ class KiteBroker(BrokerGateway):
         out: dict[str, int] = {}
         for p in self.kc.positions().get("net", []):
             if p["quantity"]:
-                out[p["tradingsymbol"]] = int(p["quantity"])
+                sym = self.reverse_map.get(p["tradingsymbol"], p["tradingsymbol"])
+                out[sym] = out.get(sym, 0) + int(p["quantity"])
         return out
 
     def margins(self) -> dict[str, float]:

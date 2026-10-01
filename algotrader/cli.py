@@ -16,6 +16,12 @@ Sub-commands
   watchdog         run the heartbeat supervisor
   engine           long-running engine: applies operator commands, publishes the UI snapshot
   ui               PySide6 desktop UI (attaches to the engine through the state database)
+  kite-setup       store the Kite Connect API key and secret in the OS credential store (once)
+  kite-login       daily Kite login (browser, password + 2FA); captures the session token
+  kite-check       verify session, static IP, enabled exchange segments
+  kite-instruments map instruments to current Kite contracts; check lot sizes
+  kite-fetch-data  download real daily history (continuous futures) into the data folder
+  kite-logout      revoke the Kite session and remove stored credentials
   verify-audit     verify the audit log hash chain
 
 The engine, gateway and watchdog roles map to these commands; in version 1 the engine hosts
@@ -79,24 +85,31 @@ def _engine_for_session(a: argparse.Namespace):
     from .core.models import Mode
     cfg = load_config(a.config)
     mode = Mode(a.mode)
+    from .core.state import StateStore
+    from .execution import kite_setup as ks
+    base = Path(a.config).resolve().parent
+    contracts = StateStore(str(base / cfg.system.state_db)).get(ks.CONTRACTS_KEY)
     broker = None
     if mode is Mode.LIVE:  # pragma: no cover - requires broker credentials
-        from .core.instruments import InstrumentRegistry
         from .execution.kite import KiteAuth, KiteBroker
-        ok, msg = KiteAuth(a.api_key, cfg.system.static_ip).check_static_ip()
+        secrets = ks.SecretStore()
+        if not secrets.api_key:
+            print("Kite is not configured: run  AlgoTrader.exe kite-setup  first")
+            raise SystemExit(2)
+        ok, msg = KiteAuth(secrets.api_key, cfg.system.static_ip).check_static_ip()
         if not ok:
             print(f"REFUSING TO TRADE: {msg} (REG-1)")
             raise SystemExit(2)
-        token = KiteAuth.load_token()
+        token = secrets.token()
         if not token:
-            print("no valid broker session for today: complete the daily login first (REG-2)")
+            print("no valid broker session for today: run  AlgoTrader.exe kite-login  first (REG-2)")
             raise SystemExit(2)
-        reg = InstrumentRegistry.from_yaml(Path(a.config) / "instruments.yaml")
-
-        def symbol_map(sym: str) -> tuple[str, str]:
-            inst = reg.get(sym) if sym in reg else reg.get(sym.split(":")[0])
-            return inst.exchange, inst.data_symbol or inst.symbol
-        broker = KiteBroker(a.api_key, token, symbol_map)
+        if not contracts or contracts.get("updated") != date.today().isoformat():
+            print("contract table missing or not refreshed today: run  AlgoTrader.exe kite-instruments  first")
+            raise SystemExit(2)
+        to_broker, reverse = ks.symbol_mapper(contracts)
+        broker = KiteBroker(secrets.api_key, token, to_broker, reverse_map=reverse,
+                            send_algo_id=cfg.system.send_algo_id)
     data_dir = Path(a.data) if a.data else Path(a.config).resolve().parent / cfg.system.data_dir
     feed = cfg.portfolio.regime.market_series
     if not (data_dir / f"{feed}.csv").exists() and not (data_dir / f"{feed}.parquet").exists():
@@ -107,8 +120,141 @@ def _engine_for_session(a: argparse.Namespace):
         raise SystemExit(2)
     engine = build_engine(a.config, mode=mode, broker=broker, data_dir=a.data,
                           state_path=cfg.system.state_db, audit_path=cfg.system.audit_log, cfg=cfg)
+    if contracts:
+        # Exchange lot / tick sizes and expiries from the last instrument refresh (FR-6.2).
+        for change in engine.registry.apply_master_refresh(ks.master_refresh_records(contracts),
+                                                           date.fromisoformat(contracts["updated"])):
+            print(f"instrument master: {change}")
     engine.restore_state()
     return engine
+
+
+# --------------------------------------------------------------------------------------------
+# Zerodha Kite setup (see execution/kite_setup.py for the workflow)
+# --------------------------------------------------------------------------------------------
+def _kite(a: argparse.Namespace):
+    from .core.audit import AuditLog
+    from .core.config import load_config
+    from .core.instruments import InstrumentRegistry
+    from .core.state import StateStore
+    from .execution import kite_setup as ks
+    cfg = load_config(a.config)
+    base = Path(a.config).resolve().parent
+    return (ks, cfg, base, InstrumentRegistry.from_yaml(Path(a.config) / "instruments.yaml"),
+            StateStore(str(base / cfg.system.state_db)), AuditLog(base / cfg.system.audit_log), ks.SecretStore())
+
+
+def _kite_run(fn):
+    """Turn setup errors into a one-line instruction instead of a traceback."""
+    def wrapper(a: argparse.Namespace) -> int:
+        from .execution.kite_setup import KiteSetupError
+        try:
+            return fn(a)
+        except KiteSetupError as exc:
+            print(f"Kite: {exc}")
+            return 2
+    return wrapper
+
+
+@_kite_run
+def cmd_kite_setup(a: argparse.Namespace) -> int:
+    import getpass
+    ks, cfg, base, reg, store, audit, secrets = _kite(a)
+    print("Kite Connect app details (https://developers.kite.trade -> My apps).")
+    print(f"The app's Redirect URL must be exactly: {cfg.system.kite_redirect_url}")
+    key = a.api_key or input("API key: ").strip()
+    secret = getpass.getpass("API secret (typing is hidden): ").strip()
+    secrets.save_app(key, secret)
+    audit.record("kite_setup", "operator", {"api_key": ks.mask(key)})
+    print("Saved in the Windows Credential Manager. Next: AlgoTrader.exe kite-login")
+    return 0
+
+
+@_kite_run
+def cmd_kite_login(a: argparse.Namespace) -> int:
+    import webbrowser
+    ks, cfg, base, reg, store, audit, secrets = _kite(a)
+    url = ks.login_url(secrets)
+    print("Opening the Kite login page. Sign in with your password and 2FA.\n" + url)
+    webbrowser.open(url)
+    token = None
+    if not a.paste:
+        print(f"Waiting up to {a.timeout:.0f}s for the redirect to {cfg.system.kite_redirect_url} ...")
+        token = ks.capture_request_token(cfg.system.kite_redirect_url, a.timeout)
+    if not token:
+        token = ks.parse_request_token(input("Paste the full address shown in the browser after login: "))
+    info = ks.complete_login(secrets, token)
+    audit.record("kite_login", "operator", info)
+    print(f"Logged in as {info['user_name']} ({info['user_id']}). The session is valid until the end of "
+          "today's trading day.\nNext: AlgoTrader.exe kite-check")
+    return 0
+
+
+@_kite_run
+def cmd_kite_check(a: argparse.Namespace) -> int:
+    from .execution.kite import KiteAuth
+    ks, cfg, base, reg, store, audit, secrets = _kite(a)
+    st = secrets.status()
+    print(f"API key: {ks.mask(secrets.api_key)}   app configured: {st['app_configured']}   "
+          f"session today: {st['session_today']}")
+    kc = ks.connect(secrets)
+    keys = sorted({k for b in cfg.bindings.bindings if b.enabled for k in b.instruments})
+    ip = KiteAuth(secrets.api_key, cfg.system.static_ip).check_static_ip()
+    res = ks.check_connection(kc, reg, keys, ip)
+    print("\n".join(res.lines))
+    contracts = store.get(ks.CONTRACTS_KEY)
+    print(f"Contract table: {'updated ' + contracts['updated'] if contracts else 'missing - run kite-instruments'}")
+    return 0 if res.ok else 1
+
+
+@_kite_run
+def cmd_kite_instruments(a: argparse.Namespace) -> int:
+    ks, cfg, base, reg, store, audit, secrets = _kite(a)
+    kc = ks.connect(secrets)
+    table, notes = ks.resolve_contracts(kc, reg, reg.keys())
+    store.set(ks.CONTRACTS_KEY, table)
+    audit.record("instrument_master_refresh", "operator", {"futures": len(table["futures"]),
+                 "indices": len(table["indices"]), "options": len(table["options"]), "notes": notes})
+    for key, c in sorted(table["futures"].items()):
+        print(f"{key:<16} {c['exchange']:<4} {c['tradingsymbol']:<22} lot {c['lot_size']:>6}  expiry {c['expiry']}")
+    for key, c in table["indices"].items():
+        print(f"{key:<16} {c['exchange']:<4} {c['tradingsymbol']}")
+    for key, o in table["options"].items():
+        print(f"{key:<16} {o['exchange']:<4} {len(o['chain'])} contracts, expiries {', '.join(o['expiries'])}")
+    for n in notes:
+        print(f"NOTE  {n}")
+    return 0
+
+
+@_kite_run
+def cmd_kite_fetch(a: argparse.Namespace) -> int:
+    ks, cfg, base, reg, store, audit, secrets = _kite(a)
+    kc = ks.connect(secrets)
+    table = store.get(ks.CONTRACTS_KEY)
+    if not table:
+        table, _ = ks.resolve_contracts(kc, reg, reg.keys())
+        store.set(ks.CONTRACTS_KEY, table)
+    data_dir = Path(a.data) if a.data else base / cfg.system.data_dir
+    paths = ks.fetch_history(kc, table, reg, data_dir, _date(a.start), _date(a.end))
+    audit.record("history_download", "operator", {"files": len(paths), "start": a.start, "dir": str(data_dir)})
+    print(f"Wrote {len(paths)} files to {data_dir} (previous demo files are in _demo_backup).\n"
+          "Delete the state folder before paper trading on real data so demo trades are not mixed in.")
+    return 0
+
+
+@_kite_run
+def cmd_kite_logout(a: argparse.Namespace) -> int:
+    ks, cfg, base, reg, store, audit, secrets = _kite(a)
+    try:
+        kc = ks.connect(secrets)
+        kc.invalidate_access_token()
+    except Exception:  # noqa: BLE001 - revoking locally is what matters
+        pass
+    secrets.revoke()
+    audit.record("kite_logout", "operator", {})
+    print("Kite session and stored credentials removed. Also revoke the app at developers.kite.trade "
+          "if you no longer use it (FR-15.8).")
+    return 0
 
 
 def cmd_run_day(a: argparse.Namespace) -> int:
@@ -338,6 +484,24 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--mode", default="paper", choices=["paper", "live"]); s.add_argument("--api-key", default=None)
     s.add_argument("--interval", type=float, default=1.0); s.add_argument("--reload-sec", type=float, default=60.0)
     s.add_argument("--once", action="store_true", help="one cycle then exit (scripts / tests)")
+    kite_cmds = (("kite-setup", cmd_kite_setup, "store your Kite Connect API key and secret (once)"),
+                 ("kite-login", cmd_kite_login, "daily Kite login in the browser (password + 2FA)"),
+                 ("kite-check", cmd_kite_check, "check session, static IP and enabled segments"),
+                 ("kite-instruments", cmd_kite_instruments, "map instruments to current Kite contracts"),
+                 ("kite-fetch-data", cmd_kite_fetch, "download daily history from Kite into the data folder"),
+                 ("kite-logout", cmd_kite_logout, "revoke the session and remove stored credentials"))
+    for name, fn, help_ in kite_cmds:
+        s = sub.add_parser(name, help=help_)
+        s.set_defaults(fn=fn)
+        s.add_argument("--config", default="config")
+        if name == "kite-setup":
+            s.add_argument("--api-key")
+        if name == "kite-login":
+            s.add_argument("--paste", action="store_true", help="skip the automatic redirect capture")
+            s.add_argument("--timeout", type=float, default=180)
+        if name == "kite-fetch-data":
+            s.add_argument("--start", default="2018-01-01"); s.add_argument("--end"); s.add_argument("--data")
+
     s = sub.add_parser("ui", help="PySide6 desktop UI; attaches to the engine's state")
     s.set_defaults(fn=cmd_ui)
     s.add_argument("--config", default="config"); s.add_argument("--refresh-ms", type=int, default=1000)

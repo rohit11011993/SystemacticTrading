@@ -48,6 +48,10 @@ jobs:
           # The installed workflow: replay builds paper state, then one engine cycle serves the UI.
           & $exe replay --config config --data smoke-data --start 2026-08-01;   if ($LASTEXITCODE) { exit 1 }
           & $exe engine --mode paper --config config --data smoke-data --once; if ($LASTEXITCODE) { exit 1 }
+          # Kite tooling is bundled and the frozen exe can reach the Windows Credential Manager:
+          # with no credentials stored it must say "not configured" (exit 2), not crash.
+          $out = & $exe kite-check --config config 2>&1 | Out-String; Write-Host $out
+          if ($LASTEXITCODE -ne 2 -or $out -notmatch "not configured") { Write-Error "kite-check unexpected"; exit 1 }
           python -c "from algotrader.ui.bridge import UiBridge; b = UiBridge('config'); alive, age = b.engine_status(); snap = b.snapshot(); print('engine alive', alive, 'nav', snap['nav'], 'trades', len(snap['trades'])); assert alive and snap['ts']"
           if ($LASTEXITCODE) { exit 1 }
 

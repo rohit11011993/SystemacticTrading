@@ -29,7 +29,9 @@ app_modules = collect_submodules("algotrader")
 for required in ("algotrader.strategy.api", "algotrader.indicators", "algotrader.data.provider"):
     if required not in app_modules:
         raise SystemExit(f"spec error: {required} not collected - is the repository root importable?")
-hidden = app_modules + ["yaml", "pydantic", "numpy", "pandas"]
+hidden = app_modules + ["yaml", "pydantic", "numpy", "pandas",
+                        # Kite Connect client and the OS credential store backend (FR-15.1)
+                        "kiteconnect", "keyring", "keyring.backends.Windows", "win32ctypes.pywin32.win32cred"]
 excludes = ["tkinter", "matplotlib", "IPython", "pytest", "hypothesis"]
 
 # Command-line / engine executable.

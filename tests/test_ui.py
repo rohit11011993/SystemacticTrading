@@ -200,3 +200,43 @@ def test_crash_guard_keeps_errors(tmp_path, monkeypatch):
     assert run_guarded(boom, console=True) == 1
     assert "engine exploded" in (tmp_path / "crash.log").read_text()
     assert run_guarded(lambda: 0) == 0
+
+
+def test_broker_panel_full_flow(qapp, tmp_path, monkeypatch):
+    """Settings -> Kite: key, login, check, instruments and download against a fake Kite."""
+    from algotrader.core.state import StateStore
+    from algotrader.execution import kite_setup as ks
+    from algotrader.ui.broker_panel import BrokerPanel
+    from algotrader.ui.main_window import MainWindow
+
+    from .test_kite_setup import FakeKite, MemKeyring
+
+    bridge = UiBridge(CONFIG, store=StateStore(str(tmp_path / "s.db")))
+    bridge.base = tmp_path                       # write downloaded data into the temp folder
+    bridge.audit_path = tmp_path / "audit.jsonl"
+    win = MainWindow(bridge, refresh_ms=60_000, interactive=False)
+    panel = BrokerPanel(win, factory=FakeKite, secrets=ks.SecretStore(MemKeyring()), interactive=False)
+
+    def finish(worker):
+        worker.wait(20_000)
+        for _ in range(5):
+            qapp.processEvents()
+
+    assert "not set" in panel.b_app.text()
+    panel.save_app("key123", "s3cret")
+    assert "saved" in panel.b_app.text()
+    finish(panel.finish_login("goodtoken"))
+    assert "logged in today" in panel.b_session.text()
+    finish(panel.check())
+    assert "Test Trader" in panel.log.toPlainText()
+    finish(panel.update_instruments())
+    assert bridge.store.get(ks.CONTRACTS_KEY)["futures"]["NIFTY_FUT"]["tradingsymbol"]
+    assert "updated" in panel.b_contracts.text()
+    monkeypatch.setattr(ks._time, "sleep", lambda s: None)              # no rate-limit pauses in tests
+    finish(panel.fetch(date(2025, 1, 1)))
+    assert (tmp_path / "data" / "NIFTY_FUT.csv").exists()
+    assert "Downloaded" in panel.log.toPlainText()
+    events = [json.loads(line)["event"] for line in (tmp_path / "audit.jsonl").read_text().splitlines()]
+    assert {"kite_setup", "kite_login"} <= set(events)
+    assert "s3cret" not in (tmp_path / "audit.jsonl").read_text()          # secrets never logged
+    win.close()

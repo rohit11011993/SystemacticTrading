@@ -10,6 +10,11 @@ plugins_dir: plugins
 orders_per_second: 2           # REG-4: own ceiling, far below the 10/s registration threshold
 broker_requests_per_second: 8  # vendor limit (FR-6.7) - re-verify against Kite docs each release
 static_ip: null                # REG-1: set to the IP registered with the broker before going live
+# Zerodha Kite Connect. Create an app at https://developers.kite.trade and set its Redirect URL
+# to exactly this value; API key and secret are stored in Windows Credential Manager
+# (AlgoTrader.exe kite-setup, or Settings -> Broker), never in this file.
+kite_redirect_url: "http://127.0.0.1:5010/kite"
+send_algo_id: false            # REG-3: set true once the broker has issued the real algo IDs below
 login_deadline: "08:45"        # FR-6.3: alert if no valid session by this time
 max_clock_drift_sec: 2         # FR-11.6
 heartbeat_timeout_sec: 30      # watchdog
