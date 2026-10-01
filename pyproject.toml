@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "algotrader"
+version = "0.1.0"
+description = "Mid-frequency systematic trading system for Indian markets (PRD R1-R7, strategies S1-S5)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "pydantic>=2.5",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+kite = ["kiteconnect>=5.0", "keyring>=24"]
+parquet = ["pyarrow>=14"]
+ui = ["PySide6>=6.6"]
+dev = ["pytest>=8", "hypothesis>=6", "mypy>=1.8", "ruff>=0.4", "pyinstaller>=6"]
+
+[project.scripts]
+algotrader = "algotrader.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["algotrader*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"

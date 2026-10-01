@@ -1,0 +1,13 @@
+# Runtime dependencies. For a release build, regenerate a hash-pinned lock file
+# (pip-compile --generate-hashes) as required by PRD section 13 / FR-15.9.
+numpy>=1.26
+pandas>=2.1
+pydantic>=2.5
+PyYAML>=6.0
+
+# Optional: live broker (Zerodha Kite Connect) and secure token storage
+# kiteconnect>=5.0
+# keyring>=24
+
+# Development / testing
+pytest>=8

@@ -1,0 +1,108 @@
+# Versioned cost table (PRD s.3). All rates in PERCENT unless noted. A Budget change is a data
+# update: add a new version with its effective date. Backtests use the table in force at the
+# time AND are reported at today's rates (strategy doc s.11).
+#
+# Sources for the 1 April 2026 STT change: BasisPoint Insight, 3 Aug 2026 (cited in the PRD).
+# Brokerage, exchange, SEBI, stamp and GST values are indicative - verify against the broker's
+# current charge sheet before release.
+
+cost_tables:
+  - effective: 2019-01-01
+    profiles:
+      equity_futures:
+        brokerage_flat: 20
+        brokerage_pct: 0.03
+        stt_sell_pct: 0.02          # pre-2026 futures STT
+        exchange_pct: 0.00173
+        sebi_per_crore: 10
+        stamp_buy_pct: 0.002
+        gst_pct: 18
+        slippage_ticks: 2
+      index_options:
+        brokerage_flat: 20
+        brokerage_pct: 100          # flat Rs 20 per order applies
+        stt_sell_pct: 0.10          # on premium
+        stt_exercise_pct: 0.125     # on intrinsic value
+        exchange_pct: 0.03503
+        sebi_per_crore: 10
+        stamp_buy_pct: 0.003
+        gst_pct: 18
+        slippage_ticks: 4
+      equity_delivery:
+        brokerage_flat: 0
+        brokerage_pct: 0
+        stt_buy_pct: 0.1
+        stt_sell_pct: 0.1
+        exchange_pct: 0.00297
+        sebi_per_crore: 10
+        stamp_buy_pct: 0.015
+        gst_pct: 18
+        slippage_ticks: 2
+      commodity_futures:
+        brokerage_flat: 20
+        brokerage_pct: 0.03
+        stt_sell_pct: 0.01          # commodity transaction tax (non-agri), sell side
+        exchange_pct: 0.0021
+        sebi_per_crore: 10
+        stamp_buy_pct: 0.002
+        gst_pct: 18
+        slippage_ticks: 2
+      currency_futures:
+        brokerage_flat: 20
+        brokerage_pct: 0.03
+        stt_sell_pct: 0.0           # no STT on currency derivatives
+        exchange_pct: 0.00035
+        sebi_per_crore: 10
+        stamp_buy_pct: 0.0001
+        gst_pct: 18
+        slippage_ticks: 1
+
+  - effective: 2026-04-01
+    profiles:
+      equity_futures:
+        brokerage_flat: 20
+        brokerage_pct: 0.03
+        stt_sell_pct: 0.05          # STT on futures sales from 1 April 2026
+        exchange_pct: 0.00173
+        sebi_per_crore: 10
+        stamp_buy_pct: 0.002
+        gst_pct: 18
+        slippage_ticks: 2
+      index_options:
+        brokerage_flat: 20
+        brokerage_pct: 100
+        stt_sell_pct: 0.15          # STT on option premium sold from 1 April 2026
+        stt_exercise_pct: 0.15      # STT on exercised options' intrinsic value
+        exchange_pct: 0.03503
+        sebi_per_crore: 10
+        stamp_buy_pct: 0.003
+        gst_pct: 18
+        slippage_ticks: 4
+      equity_delivery:
+        brokerage_flat: 0
+        brokerage_pct: 0
+        stt_buy_pct: 0.1
+        stt_sell_pct: 0.1
+        exchange_pct: 0.00297
+        sebi_per_crore: 10
+        stamp_buy_pct: 0.015
+        gst_pct: 18
+        slippage_ticks: 2
+      commodity_futures:
+        brokerage_flat: 20
+        brokerage_pct: 0.03
+        stt_sell_pct: 0.01
+        exchange_pct: 0.0021
+        sebi_per_crore: 10
+        stamp_buy_pct: 0.002
+        gst_pct: 18
+        slippage_ticks: 2
+      currency_futures:
+        brokerage_flat: 20
+        brokerage_pct: 0.03
+        stt_sell_pct: 0.0
+        exchange_pct: 0.00035
+        sebi_per_crore: 10
+        stamp_buy_pct: 0.0001
+        gst_pct: 18
+        slippage_ticks: 1

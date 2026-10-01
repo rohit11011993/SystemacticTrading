@@ -1,0 +1,207 @@
+# Instrument registry (PRD s.5). Adding an instrument = adding a record here; no code change.
+#
+# IMPORTANT: lot sizes, tick sizes, margins and expiries below are indicative starting values.
+# The daily instrument-master refresh (FR-6.2) overwrites them from the exchange/broker and
+# flags any change for review. Verify every value before paper or live trading.
+#
+# specs: contract specification versioned by effective date (lot size changes are common).
+# margin_pct: approximate initial margin as % of notional, used for the pre-trade margin rule.
+# cluster: correlated-cluster key used by the cluster exposure cap.
+
+instruments:
+  NIFTY_FUT:
+    symbol: NIFTY
+    exchange: NFO
+    segment: FUT
+    type: index_future
+    specs:
+      - {effective: 2019-01-01, lot_size: 75, tick_size: 0.05}
+      - {effective: 2026-01-01, lot_size: 65, tick_size: 0.10}
+    margin_pct: 12
+    session: NSE
+    cost_profile: equity_futures
+    sector: index
+    cluster: india_equity_index
+    beta: 1.0
+    liquidity: {adv_lots: 200000, max_adv_pct: 1.0}
+    flags: {roll_days_before_expiry: 3, open_cutoff_days: 2}
+
+  BANKNIFTY_FUT:
+    symbol: BANKNIFTY
+    exchange: NFO
+    segment: FUT
+    type: index_future
+    specs:
+      - {effective: 2019-01-01, lot_size: 30, tick_size: 0.05}
+      - {effective: 2026-01-01, lot_size: 30, tick_size: 0.20}
+    margin_pct: 12
+    session: NSE
+    cost_profile: equity_futures
+    sector: index
+    cluster: india_equity_index
+    beta: 1.15
+    liquidity: {adv_lots: 100000, max_adv_pct: 1.0}
+
+  INDIAVIX:
+    symbol: INDIAVIX
+    exchange: NSE
+    segment: INDEX
+    type: index
+    specs: [{effective: 2019-01-01, lot_size: 1, tick_size: 0.0025}]
+    cost_profile: equity_futures
+    tradable: false
+
+  NIFTY_OPT:
+    symbol: NIFTY
+    exchange: NFO
+    segment: OPT
+    type: index_option
+    underlying: NIFTY_FUT
+    specs:
+      - {effective: 2019-01-01, lot_size: 75, tick_size: 0.05}
+      - {effective: 2026-01-01, lot_size: 65, tick_size: 0.05}
+    strike_step: 50
+    wing_width: 300
+    margin_pct: 0
+    session: NSE
+    cost_profile: index_options
+    sector: index
+    cluster: india_equity_index
+    # Expiry days have changed more than once; the master refresh supplies explicit dates
+    # (flags.expiries). This rule is only the fallback for synthetic / offline runs.
+    expiry_rule: {kind: last_weekday, weekday: 1}
+
+  GOLD_FUT:
+    symbol: GOLDM
+    exchange: MCX
+    segment: FUT
+    type: commodity_future
+    specs: [{effective: 2019-01-01, lot_size: 10, tick_size: 1.0}]
+    margin_pct: 8
+    session: MCX
+    cost_profile: commodity_futures
+    sector: metals
+    cluster: precious
+    beta: 0.0
+    liquidity: {adv_lots: 20000, max_adv_pct: 1.0}
+
+  SILVER_FUT:
+    symbol: SILVERM
+    exchange: MCX
+    segment: FUT
+    type: commodity_future
+    specs: [{effective: 2019-01-01, lot_size: 5, tick_size: 1.0}]
+    margin_pct: 10
+    session: MCX
+    cost_profile: commodity_futures
+    sector: metals
+    cluster: precious
+    beta: 0.0
+    liquidity: {adv_lots: 10000, max_adv_pct: 1.0}
+
+  CRUDE_FUT:
+    symbol: CRUDEOIL
+    exchange: MCX
+    segment: FUT
+    type: commodity_future
+    specs: [{effective: 2019-01-01, lot_size: 100, tick_size: 1.0}]
+    margin_pct: 12
+    session: MCX
+    cost_profile: commodity_futures
+    sector: energy
+    cluster: energy
+    beta: 0.0
+    liquidity: {adv_lots: 50000, max_adv_pct: 1.0}
+
+  USDINR_FUT:
+    symbol: USDINR
+    exchange: CDS
+    segment: FUT
+    type: currency_future
+    specs: [{effective: 2019-01-01, lot_size: 1000, tick_size: 0.0025}]
+    margin_pct: 3
+    session: CDS
+    cost_profile: currency_futures
+    sector: fx
+    cluster: fx
+    beta: 0.0
+    liquidity: {adv_lots: 500000, max_adv_pct: 1.0}
+
+  # --- Liquid stock futures (S2, S3, S4). Sector drives the S3 / S4 sector caps. ----------
+  HDFCBANK_FUT:
+    symbol: HDFCBANK
+    exchange: NFO
+    segment: FUT
+    type: stock_future
+    specs: [{effective: 2019-01-01, lot_size: 550, tick_size: 0.05}]
+    margin_pct: 18
+    session: NSE
+    cost_profile: equity_futures
+    sector: bank
+    beta: 1.1
+    liquidity: {adv_lots: 30000, max_adv_pct: 1.0}
+
+  ICICIBANK_FUT:
+    symbol: ICICIBANK
+    exchange: NFO
+    segment: FUT
+    type: stock_future
+    specs: [{effective: 2019-01-01, lot_size: 700, tick_size: 0.05}]
+    margin_pct: 18
+    session: NSE
+    cost_profile: equity_futures
+    sector: bank
+    beta: 1.1
+    liquidity: {adv_lots: 30000, max_adv_pct: 1.0}
+
+  KOTAKBANK_FUT:
+    symbol: KOTAKBANK
+    exchange: NFO
+    segment: FUT
+    type: stock_future
+    specs: [{effective: 2019-01-01, lot_size: 400, tick_size: 0.05}]
+    margin_pct: 18
+    session: NSE
+    cost_profile: equity_futures
+    sector: bank
+    beta: 1.0
+    liquidity: {adv_lots: 20000, max_adv_pct: 1.0}
+
+  AXISBANK_FUT:
+    symbol: AXISBANK
+    exchange: NFO
+    segment: FUT
+    type: stock_future
+    specs: [{effective: 2019-01-01, lot_size: 625, tick_size: 0.05}]
+    margin_pct: 18
+    session: NSE
+    cost_profile: equity_futures
+    sector: bank
+    beta: 1.2
+    liquidity: {adv_lots: 20000, max_adv_pct: 1.0}
+
+  INFY_FUT:
+    symbol: INFY
+    exchange: NFO
+    segment: FUT
+    type: stock_future
+    specs: [{effective: 2019-01-01, lot_size: 400, tick_size: 0.05}]
+    margin_pct: 18
+    session: NSE
+    cost_profile: equity_futures
+    sector: it
+    beta: 0.8
+    liquidity: {adv_lots: 25000, max_adv_pct: 1.0}
+
+  TCS_FUT:
+    symbol: TCS
+    exchange: NFO
+    segment: FUT
+    type: stock_future
+    specs: [{effective: 2019-01-01, lot_size: 175, tick_size: 0.05}]
+    margin_pct: 18
+    session: NSE
+    cost_profile: equity_futures
+    sector: it
+    beta: 0.7
+    liquidity: {adv_lots: 20000, max_adv_pct: 1.0}

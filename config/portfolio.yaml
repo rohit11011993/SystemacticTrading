@@ -1,0 +1,87 @@
+# Portfolio construction and capital allocation (strategy doc s.10) and the regime permission
+# table (strategy doc s.3). Capital is allocated as shares of RISK, not rupees of margin.
+
+book_risk_budget_pct: 8.0      # total open risk of the book, % of NAV (shares below apply to it)
+reserve_share: 0.05            # unallocated reserve
+
+strategies:
+  S1_ADAPTIVE_TREND:
+    risk_share: 0.30
+    per_trade_risk_pct: 0.5
+    max_concurrent: 4
+    hard_stop_pct: 5.0
+    soft_stop_pct: 3.0
+    family: trend
+  S2_CHANNEL_BREAKOUT:
+    risk_share: 0.20
+    per_trade_risk_pct: 0.5
+    per_trade_risk_pct_stock: 0.25
+    max_concurrent: 4
+    hard_stop_pct: 5.0
+    soft_stop_pct: 3.0
+    family: trend
+  S3_SHORT_TERM_REVERSAL:
+    risk_share: 0.15
+    per_trade_risk_pct: 0.25
+    max_concurrent: 5
+    max_per_sector: 2
+    hard_stop_pct: 4.0
+    soft_stop_pct: 2.4
+    family: reversion
+  S4_STAT_PAIRS:
+    risk_share: 0.20
+    per_trade_risk_pct: 0.5
+    max_concurrent: 4
+    max_per_sector: 1
+    hard_stop_pct: 4.0
+    soft_stop_pct: 2.4
+    family: reversion
+    high_tail_risk: true
+  S5_RANGE_IRON_CONDOR:
+    risk_share: 0.10
+    per_trade_risk_pct: 0.5
+    max_concurrent: 1
+    hard_stop_pct: 2.0
+    soft_stop_pct: 1.2
+    family: reversion
+    high_tail_risk: true
+
+families:
+  trend: {max_share: 0.50}       # S1 + S2 can hold the same instrument in the same direction
+  reversion: {max_share: 0.45}   # S3 + S4 + S5 lose together when a market-wide move does not revert
+
+regime:
+  er_window: 10
+  er_threshold: 0.30            # one threshold shared by every strategy (not tuned per strategy)
+  vix_lookback: 252
+  vix_stress_pct: 0.80
+  confirm_days: 2               # hysteresis: new regime must hold 2 consecutive days
+  market_series: NIFTY_FUT
+  vix_series: INDIAVIX
+  # Size multiplier for NEW entries per regime (0 = no new entries). Never closes open trades.
+  # S1/S2 also apply their own instrument-level ER filter; S3 and S5 apply stricter VIX rules.
+  permissions:
+    TREND_CALM:
+      S1_ADAPTIVE_TREND: 1.0
+      S2_CHANNEL_BREAKOUT: 1.0
+      S3_SHORT_TERM_REVERSAL: 0.5
+      S4_STAT_PAIRS: 1.0
+      S5_RANGE_IRON_CONDOR: 0.0
+    TREND_STRESSED:
+      S1_ADAPTIVE_TREND: 0.5
+      S2_CHANNEL_BREAKOUT: 0.5
+      S3_SHORT_TERM_REVERSAL: 0.0
+      S4_STAT_PAIRS: 0.5
+      S5_RANGE_IRON_CONDOR: 0.0
+    RANGE_CALM:
+      S1_ADAPTIVE_TREND: 1.0
+      S2_CHANNEL_BREAKOUT: 1.0
+      S3_SHORT_TERM_REVERSAL: 1.0
+      S4_STAT_PAIRS: 1.0
+      S5_RANGE_IRON_CONDOR: 1.0
+    RANGE_STRESSED:
+      S1_ADAPTIVE_TREND: 0.5
+      S2_CHANNEL_BREAKOUT: 0.5
+      S3_SHORT_TERM_REVERSAL: 0.0
+      S4_STAT_PAIRS: 0.5
+      S5_RANGE_IRON_CONDOR: 0.0

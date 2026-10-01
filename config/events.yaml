@@ -1,0 +1,26 @@
+# Event calendar (strategy doc s.4 "Event and expiry rules").
+# No new entries within the window around these events. Existing positions follow their own
+# exits. The dates below are EXAMPLES to show the format - replace them with the official
+# exchange holiday list, RBI MPC schedule and Budget date, and verify each one.
+
+blackout_days_before: 1
+blackout_days_after: 0
+results_window_days: 3
+expiry_day_blackout: true
+
+holidays: []          # exchange trading holidays (YYYY-MM-DD)
+
+events:
+  - {date: 2024-02-01, type: union_budget, note: Interim Budget}
+  - {date: 2024-06-04, type: election_result, note: General election results}
+  - {date: 2024-07-23, type: union_budget}
+  - {date: 2025-02-01, type: union_budget}
+  - {date: 2025-04-09, type: rbi_policy}
+  - {date: 2025-06-06, type: rbi_policy}
+  - {date: 2025-08-06, type: rbi_policy}
+  - {date: 2025-10-01, type: rbi_policy}
+  - {date: 2025-12-05, type: rbi_policy}
+  - {date: 2026-02-01, type: union_budget}
+
+# Company results dates per instrument key (single-stock strategies stand aside around them).
+results: {}

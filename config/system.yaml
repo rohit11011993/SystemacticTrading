@@ -1,0 +1,33 @@
+# System settings (PRD s.3, s.6, s.11, s.13). Every value is a default the operator can change.
+mode: backtest                 # backtest | paper | live
+capital: 5000000               # starting NAV in rupees (Rs 50 lakh). Capital decides which strategies are viable.
+data_dir: data
+state_db: state/state.db
+audit_log: state/audit.jsonl
+reports_dir: reports
+plugins_dir: plugins
+
+orders_per_second: 2           # REG-4: own ceiling, far below the 10/s registration threshold
+broker_requests_per_second: 8  # vendor limit (FR-6.7) - re-verify against Kite docs each release
+static_ip: null                # REG-1: set to the IP registered with the broker before going live
+login_deadline: "08:45"        # FR-6.3: alert if no valid session by this time
+max_clock_drift_sec: 2         # FR-11.6
+heartbeat_timeout_sec: 30      # watchdog
+reconcile_interval_min: 60     # FR-11.3
+
+vol_target_annual: 0.12        # portfolio volatility overlay (strategy doc s.4); null disables
+vol_overlay_min_scale: 0.5
+gateway_dry_run: false         # FR-7.5: report what would be blocked without blocking
+
+sessions:
+  NSE: {open: "09:15", close: "15:30"}
+  MCX: {open: "09:00", close: "23:30"}
+  CDS: {open: "09:00", close: "17:00"}
+
+# Exchange-assigned algo IDs (REG-3). Placeholders until the broker assigns real IDs.
+algo_tags:
+  S1_ADAPTIVE_TREND: ALGO-S1
+  S2_CHANNEL_BREAKOUT: ALGO-S2
+  S3_SHORT_TERM_REVERSAL: ALGO-S3
+  S4_STAT_PAIRS: ALGO-S4
+  S5_RANGE_IRON_CONDOR: ALGO-S5

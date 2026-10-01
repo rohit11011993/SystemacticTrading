@@ -1,0 +1,48 @@
+# Strategy <-> instrument bindings (PRD s.5). Strategies and instruments meet only here.
+# stage follows the lifecycle draft -> backtest -> paper -> live_reduced -> live -> retired.
+# The validator refuses a live binding whose stage has not passed the promotion gates.
+
+bindings:
+  - strategy: S1_ADAPTIVE_TREND
+    instruments: [NIFTY_FUT, BANKNIFTY_FUT, GOLD_FUT, SILVER_FUT, CRUDE_FUT, USDINR_FUT]
+    mode: backtest
+    stage: backtest
+    risk_profile: conservative
+    params: {er_min: 0.30, f_atr: 0.30, k_init: 2.5, k_trail: 3.0}
+
+  - strategy: S2_CHANNEL_BREAKOUT
+    instruments: [NIFTY_FUT, BANKNIFTY_FUT, GOLD_FUT, SILVER_FUT, CRUDE_FUT, USDINR_FUT,
+                  HDFCBANK_FUT, ICICIBANK_FUT, INFY_FUT, TCS_FUT]
+    mode: backtest
+    stage: backtest
+    risk_profile: conservative
+    params: {n_entry: 20, comp_max: 0.85, k_stop: 2.5, n_exit: 10}
+
+  - strategy: S3_SHORT_TERM_REVERSAL
+    instruments: [HDFCBANK_FUT, ICICIBANK_FUT, KOTAKBANK_FUT, AXISBANK_FUT, INFY_FUT, TCS_FUT]
+    mode: backtest
+    stage: backtest
+    risk_profile: conservative
+    params: {z_entry: 1.5, n_hold: 5, k_stop: 2.0, ret_window: 3, hedge_instrument: NIFTY_FUT}
+
+  - strategy: S4_STAT_PAIRS
+    instruments: [HDFCBANK_FUT, ICICIBANK_FUT, KOTAKBANK_FUT, AXISBANK_FUT, INFY_FUT, TCS_FUT]
+    mode: backtest
+    stage: backtest
+    risk_profile: conservative
+    params:
+      z_in: 2.0
+      z_out: 0.5
+      z_stop: 3.5
+      z_window: 60
+      pairs:                      # candidates for screening, not recommendations
+        - [HDFCBANK_FUT, ICICIBANK_FUT]
+        - [KOTAKBANK_FUT, AXISBANK_FUT]
+        - [INFY_FUT, TCS_FUT]
+
+  - strategy: S5_RANGE_IRON_CONDOR
+    instruments: [NIFTY_OPT]
+    mode: backtest
+    stage: backtest
+    risk_profile: defined_risk_only
+    params: {short_delta: 0.16, dte_entry: 30, take_profit: 0.5, loss_stop: 1.0}
